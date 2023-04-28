@@ -20,17 +20,24 @@ def packet_info(packet):
     Returns:
         dictionary contains all the information in the packet and a boolean indicating whether the data was corrupted.
     """
-    udp_header = unpack("!III32s", packet[:44])
-    request = packet[44:]
+    udp_header = unpack("!HHH32s", packet[:38])
+    tcp_header = unpack("!HHHH6s", packet[38:52])
+    request = packet[52:]
+    print("---------\nudp header")
+    print(udp_header)
+    print("---------\ntcp header")
+    print(tcp_header)
+    print("---------\nhttp request")
+    print(request)
+    print("---------")
     correct_checksum = udp_header[3].decode()
     checksum = check_data(request, correct_checksum)
-    return {
+    return checksum, {
         'src_port':udp_header[0],
         'dest_port':udp_header[1],
         'length':udp_header[2],
         'correct_checksum':correct_checksum,
-        'request':request.decode(),
-        'checksum':checksum
+        'request':request.decode()
     }
 
 
@@ -68,11 +75,11 @@ def extract_http(request):
     file = http_parsed[1].replace("/", "")
     if method == "GET":
         if file in FILES:
-            response = http_response("GET", "200", "OK", data=file)
+            response = http_response(method, "200", "OK", data=file)
         else:
-            response = http_response("GET", "404", "Not Found")
+            response = http_response(method, "404", "Not Found")
     elif method == "POST":
-        response = http_response("POST", "200", "OK")
+        response = http_response(method, "200", "OK")
     return response
 
 
@@ -94,11 +101,11 @@ while(True):
     packet, addr = server.recvfrom(1024) # buffer size is 1024 bytes
     print("*** message from:",addr)
 
-    packet_data = packet_info(packet)
+    checksum, packet_data = packet_info(packet)
     print(packet_data)
 
     response = ""
-    if packet_data['checksum']:
+    if checksum:
         response = extract_http(packet_data['request'])
     else:
         response = "corrupted!"
