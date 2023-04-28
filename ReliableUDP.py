@@ -12,7 +12,7 @@ class ClientConnectionInfo:
 
 class ReliableUDPServer:
     max_packet_size: int = 8192
-    timeout: float = 0.3  # timeout in seconds
+    packet_loss_timeout: float = 0.3  # packet_loss_timeout in seconds
     clients_connections: dict[str, ClientConnectionInfo] = {}
     # maps each client address (str) to their own ClientConnectionInfo
 
@@ -57,7 +57,9 @@ class ReliableUDPServer:
             # calculate the minimum timeout to ensure the closest expiry is checked
             min_datetime = datetime.fromisoformat(min_datetime_iso)
             min_timeout = max(
-                0, self.timeout - (current_datetime - min_datetime).total_seconds()
+                0,
+                self.packet_loss_timeout
+                - (current_datetime - min_datetime).total_seconds(),
             )
 
             self.socket.settimeout(min_timeout)
