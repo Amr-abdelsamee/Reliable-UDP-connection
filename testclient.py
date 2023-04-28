@@ -38,7 +38,8 @@ while True:
                 received = str(
                     sock.recvfrom(reliable_udp_client.max_packet_size), "utf-8"
                 )
-
+                # check received is not corrupted
+                # check received is the appropriate seq number
                 reliable_udp_client.client_connection.packets_buffer.append(received)
                 break
             except socket.timeout:

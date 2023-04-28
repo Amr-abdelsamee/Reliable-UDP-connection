@@ -23,11 +23,15 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
                 # find out which client(s) timed out and deal with them
                 pass
         else:
+            # check not corrupted
             if self.client_address in self.clients_connections:
+                # check expected seq/ack
+
                 # continue client connection
                 pass
             else:
                 # new client connection
+
                 pass
         return self.clients_connections
 

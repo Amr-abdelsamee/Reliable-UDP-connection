@@ -10,6 +10,7 @@ class ClientConnectionInfo:
     datetime_iso: str = ""
     packets_buffer: list[str] = []
     control_flag_bits: int = 0b000000
+    last_packet: str
 
 
 class ReliableUDPServer:
@@ -97,11 +98,11 @@ class ReliableUDPClient:
             checksum = crc32(message)
             http_request = http_request[max_len:]
             packet = pack(
-                f"!IIIII{len(message)}s",
+                f"!IIIIII{len(message)}s",
+                checksum,
                 self.client_connection.ack,
                 self.client_connection.seq,
                 self.client_connection.control_flag_bits,
-                checksum,
                 message,
             )
             packet_len = header_length + len(message)
@@ -110,9 +111,3 @@ class ReliableUDPClient:
             packets.append(packet)
 
         return packets
-
-
-"""
-
-
-"""
