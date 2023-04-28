@@ -19,16 +19,18 @@ def http_request(method, file_name, host="localhost", browser="browserX/2.0", da
     system = platform.uname()
     User_Agent = browser + ' (' + system[0] +' '+ system[2] +' '+ system[4] + ')'
 
-    header_p1 = method + " /" + file_name + " HTTP/1.0"
-    header_p2 = "User_Agent: " + User_Agent
-    header_p3 = "Host: " + host
+    header = (
+    method + " /" + file_name + " HTTP/1.0" + "\n" +
+    "User_Agent: " + User_Agent  + "\n" +
+    "Host: " + host + "\n" 
+    )
 
-    if method == "GET":
-        header =  header_p1 + "\n" + header_p2 + "\n" + header_p3
-    elif method == "POST":
-        header_p4 = "Content-Type: text/plain"
-        header_p5 = "Content-Length: " + str(len(data))
-        header =  header_p1 + "\n" + header_p2 + "\n" + header_p3 + "\n" + header_p4 + "\n" + header_p5 + "\n\n" + data
+    if method == "POST":
+        header_p1 = (
+        "Content-Type: text/plain" + "\n"
+        "Content-Length: " + str(len(data)) 
+        )
+        header =  header + header_p1 + "\n\n" + data
     return header
 
 # most common types of Content-Type:
@@ -55,16 +57,16 @@ def http_response(method, status_code, status,  data="", browser="browserX/2.0")
     system = platform.uname()
     now = datetime.now()
 
-    header_p1 = "HTTP/1.0 " + status_code + " " + status
-    header_p2 = "Date: " + now.strftime("%a, %d %b %Y %H:%M:%S %Z")
-    header_p3 = "Server: " + browser + ' (' + system[0] +' '+ system[2] +' '+ system[4] + ')'
-    header_p4 = "Content-Length: " + str(len(data))
-    header_p5 = "Content-Type: " + "text/plain"
+    header = (
+    "HTTP/1.0 " + status_code + " " + status + "\n" +
+    "Date: " + now.strftime("%a, %d %b %Y %H:%M:%S %Z") + "\n" +
+    "Server: " + browser + ' (' + system[0] +' '+ system[2] +' '+ system[4] + ')\n' +
+    "Content-Length: " + str(len(data)) + "\n" +
+    "Content-Type: " + "text/plain"
+    )
     
     if method == "GET":
-        header = header_p1 + "\n" + header_p2 + "\n" + header_p3 + "\n" + header_p4 + "\n" + header_p5 + "\n\n" + data
-    elif method == "POST":
-        header = header_p1 + "\n" + header_p2 + "\n" + header_p3 + "\n" + header_p4 + "\n" + header_p5
+        header = header + "\n\n" + data
     return header
 
 
