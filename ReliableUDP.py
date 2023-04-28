@@ -7,6 +7,8 @@ class ClientConnectionInfo:
     last_ack_datetime_iso: str = ""
     last_seq: int = 0
     last_seq_datetime_iso: str = ""
+    window_size: int = 4
+    packets_buffer: list[str] = []
     control_flag_bits: int = 0b000000
 
 
@@ -69,3 +71,24 @@ class ReliableUDPServer:
 
     def __exit__(self, *args):
         pass
+
+
+class ReliableUDPClient:
+    max_packet_size: int = 8192
+    packet_loss_timeout: float = 0.3  # packet_loss_timeout in seconds
+    client_connection: ClientConnectionInfo
+
+    def wrap_http(method: str, file_name: str, data: str, host: str, user_agent: str):
+        message = f"""{method} /{file_name} HTTP/1.0
+        Host: {host}
+        User-Agent: {user_agent}"""
+        if method == "POST":
+            message += f"""
+            Content-Type: text/html
+            Content-Length: {len(data)}"""
+        return message
+
+    def get_packets(http_request: str):
+        packets = []
+
+        return packets
