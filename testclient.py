@@ -27,26 +27,19 @@ while True:
     http_request = reliable_udp_client.wrap_http(file_name, info, host, user_agent)
     reliable_udp_packets = reliable_udp_client.get_packets(http_request)
 
-    while True:
-        window_packets = reliable_udp_packets[:4]
-        for packet in window_packets:
-            sock.sendto(bytes(packet, "utf-8"), (HOST, PORT))
+    while len(reliable_udp_packets):
+        next_packet = reliable_udp_packets[0]
+        reliable_udp_packets = reliable_udp_packets[1:]
+        sock.sendto(bytes(next_packet, "utf-8"), (HOST, PORT))
         sock.settimeout(reliable_udp_client.packet_loss_timeout)
 
-        received_all = False
-
-        while not received_all:
+        while True:
             try:
-                received = str(sock.recv(reliable_udp_client.max_packet_size), "utf-8")
+                received = str(
+                    sock.recvfrom(reliable_udp_client.max_packet_size), "utf-8"
+                )
+
                 reliable_udp_client.client_connection.packets_buffer.append(received)
-            except socket.timeout:
                 break
-            # check if flag indicates there's another packet incoming (message larger than packet length)
-            received_all = True
-
-    file_name = input("file name: ")
-    # sock.sendto(bytes(data + "\n", "utf-8"), (HOST, PORT))
-    received = str(sock.recv(1024), "utf-8")
-
-    # print("Sent:     {}".format(data))
-    print("Received: {}".format(received))
+            except socket.timeout:
+                sock.sendto(bytes(next_packet, "utf-8"), (HOST, PORT))

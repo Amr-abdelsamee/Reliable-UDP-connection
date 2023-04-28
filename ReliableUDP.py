@@ -1,13 +1,13 @@
 import socket
 from datetime import datetime
+from struct import pack
+from zlib import crc32
 
 
 class ClientConnectionInfo:
-    last_ack: int = 0
-    last_ack_datetime_iso: str = ""
-    last_seq: int = 0
-    last_seq_datetime_iso: str = ""
-    window_size: int = 4
+    ack: int = 0
+    seq: int = 1
+    datetime_iso: str = ""
     packets_buffer: list[str] = []
     control_flag_bits: int = 0b000000
 
@@ -49,13 +49,8 @@ class ReliableUDPServer:
             current_datetime = datetime.now()
             current_datetime_iso = current_datetime.isoformat(timespec="microseconds")
             min_datetime_iso = current_datetime_iso
-            for client_connection in self.clients_connections:
-                min_datetime_iso = min(
-                    min_datetime_iso, client_connection.last_ack_timestamp
-                )
-                min_datetime_iso = min(
-                    min_datetime_iso, client_connection.last_seq_timestamp
-                )
+            for _, client_connection in self.clients_connections:
+                min_datetime_iso = min(min_datetime_iso, client_connection.datetime_iso)
             # calculate the minimum timeout to ensure the closest expiry is checked
             min_datetime = datetime.fromisoformat(min_datetime_iso)
             min_timeout = max(
@@ -78,7 +73,9 @@ class ReliableUDPClient:
     packet_loss_timeout: float = 0.3  # packet_loss_timeout in seconds
     client_connection: ClientConnectionInfo
 
-    def wrap_http(method: str, file_name: str, data: str, host: str, user_agent: str):
+    def wrap_http(
+        self, method: str, file_name: str, data: str, host: str, user_agent: str
+    ) -> str:
         message = f"""{method} /{file_name} HTTP/1.0
         Host: {host}
         User-Agent: {user_agent}"""
@@ -88,7 +85,34 @@ class ReliableUDPClient:
             Content-Length: {len(data)}"""
         return message
 
-    def get_packets(http_request: str):
+    def get_packets(self, http_request: str) -> list:
         packets = []
+        header_length = (
+            20  # 4 byte unsigned int [ack, seq, control_flag_bits, checksum]
+        )
+        max_len = self.max_packet_size - header_length
+        n = len(http_request) / max_len
+        for i in range(n):
+            message = http_request[:max_len]
+            checksum = crc32(message)
+            http_request = http_request[max_len:]
+            packet = pack(
+                f"!IIIII{len(message)}s",
+                self.client_connection.ack,
+                self.client_connection.seq,
+                self.client_connection.control_flag_bits,
+                checksum,
+                message,
+            )
+            packet_len = header_length + len(message)
+            self.client_connection.seq += packet_len
+
+            packets.append(packet)
 
         return packets
+
+
+"""
+
+
+"""

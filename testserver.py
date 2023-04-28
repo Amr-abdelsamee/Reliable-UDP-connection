@@ -19,7 +19,7 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
         if self.client_address == None:  # deal with timeout(s)
             current_datetime = datetime.now()
             current_datetime_iso = current_datetime.isoformat(timespec="microseconds")
-            for client_connection in self.clients_connections:
+            for client_addr, client_connection in self.clients_connections:
                 # find out which client(s) timed out and deal with them
                 pass
         else:
@@ -29,13 +29,6 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
             else:
                 # new client connection
                 pass
-            # dummy code start
-            data = self.request[0].strip()
-            socket = self.request[1]
-            print("{} wrote:".format(self.client_address[0]))
-            print(data)
-            socket.sendto(data.upper(), self.client_address)
-            # dummy code end
         return self.clients_connections
 
 
