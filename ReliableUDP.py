@@ -6,7 +6,7 @@ class ClientConnectionInfo:
     last_ack: int = 0
     last_ack_datetime_iso: str = ""
     last_seq: int = 0
-    last_ack_datetime_iso: str = ""
+    last_seq_datetime_iso: str = ""
     control_flag_bits: int = 0b000000
 
 
