@@ -94,6 +94,8 @@ while True:
                         packet[HEADER_LENGTH:].decode()
                     )
                     client_connection.num = not client_connection.num
+                    response_packet = get_ack_packet(SRC_PORT, client_connection.num)
+                    sock.sendto(response_packet, (DEST_ADDR, DEST_PORT))
                 else:
                     raise socket.timeout
             except socket.timeout:
@@ -163,9 +165,9 @@ while True:
                     client_connection.data_buffer.append(
                         packet[HEADER_LENGTH:].decode()
                     )
-                    response_packet = get_ack_packet(SRC_PORT, num)
-                    sock.sendto(response_packet, (DEST_ADDR, DEST_PORT))
                     client_connection.num = not client_connection.num
+                    response_packet = get_ack_packet(SRC_PORT, client_connection.num)
+                    sock.sendto(response_packet, (DEST_ADDR, DEST_PORT))
                 else:
                     raise socket.timeout
             except socket.timeout:
