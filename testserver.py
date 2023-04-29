@@ -9,6 +9,7 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
         self,
         request,
         client_address,
+        client_port,
         server: ReliableUDPServer,
         clients_connections: dict[str, ClientConnectionInfo],
     ) -> dict[str, ClientConnectionInfo]:
@@ -17,6 +18,7 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
         if client_address != None:
             self.packet = self.request[0]
             self.socket = self.request[1]
+            self.client_port = client_port
 
     def handle(self) -> dict[str, ClientConnectionInfo]:
         if self.client_address == None:  # deal with timeout(s)
@@ -32,8 +34,8 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
                         current_datetime - client_datetime
                     ).total_seconds() >= self.server.packet_loss_timeout:
                         self.socket.sendto(
-                            bytes(client_connection.last_packet, "utf-8"),
-                            (client_addr, client_connection.port),
+                            client_connection.last_packet,
+                            (client_addr, self.client_port),
                         )
                         self.clients_connections[
                             client_addr
@@ -42,10 +44,10 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
             # check not corrupted
             header = unpack(self.packet[:HEADER_LENGTH])
             checksum = header[0]
-            src_port = header[1]
-            num = header[2]
-            ack = header[3]
-            fin = header[4]
+            num = header[1]
+            ack = header[2]
+            fin = header[3]
+            more = header[4]
             packet = (
                 pack(
                     PACK_FORMAT,
@@ -61,10 +63,10 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
             if crc32(packet) == checksum:
                 if self.client_address in self.clients_connections:
                     client_connection = self.clients_connections[self.client_address]
-                    if header[2] != client_connection.num:
+                    if num != client_connection.num:
                         self.socket.sendto(
-                            bytes(client_connection.last_packet, "utf-8"),
-                            (self.client_address, client_connection.port),
+                            client_connection.last_packet,
+                            (self.client_address, self.client_port),
                         )
                         current_datetime = datetime.now()
                         current_datetime_iso = current_datetime.isoformat(
@@ -78,16 +80,12 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
                             self.clients_connections.pop(self.client_address)
                         elif fin:  # FIN
                             packet = get_fin_packet(
-                                self.server.server_address[1],
                                 client_connection.num,
                                 1,
                             )
                             self.socket.sendto(
-                                bytes(
-                                    packet,
-                                    "utf-8",
-                                ),
-                                (self.client_address, client_connection.port),
+                                packet,
+                                (self.client_address, self.client_port),
                             )
                             current_datetime = datetime.now()
                             current_datetime_iso = current_datetime.isoformat(
@@ -112,17 +110,36 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
                         self.clients_connections[
                             self.client_address
                         ] = ClientConnectionInfo()
-                        self.clients_connections[self.client_address].port = src_port
+                        data = packet[HEADER_LENGTH:].decode()
+
+                        if data[:3] == "GET":
+                            client_connection.GET = 1
+                            client_connection.working = 1
+                            client_connection.receive_data_buffer.append(data)
+                            if more:
+                                response_packet = get_ack_packet(num)
+                                self.socket.sendto(
+                                    response_packet,
+                                    (self.client_address, self.client_port),
+                                )
+                            else:
+                                # get file into packets
+                                # add to send_data_buffer
+                                # start sending
+                                # start sending response
+                                pass
+                        else:
+                            
+
                         # TODO: parse http
                         # server maybe will need while loop here to finish sending the whole file
                         # or receive part of file
                         # continue client connection
-                        self.clients_connections[self.client_address].waiting = 1
             else:
                 client_connection = self.clients_connections[self.client_address]
                 self.socket.sendto(
-                    bytes(client_connection.last_packet, "utf-8"),
-                    (self.client_address, client_connection.port),
+                    client_connection.last_packet,
+                    (self.client_address, self.client_port),
                 )
                 current_datetime = datetime.now()
                 current_datetime_iso = current_datetime.isoformat(

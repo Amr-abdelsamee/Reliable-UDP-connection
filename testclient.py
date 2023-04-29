@@ -24,25 +24,26 @@ while True:
     elif method != "GET":
         print("Enter valid method")
     file_name = input("file name: ")
-
+    http_request = get_http_request(method, file_name, info, host, user_agent)
+    client_connection.send_packets_buffer = get_packets(
+        http_request, client_connection.num
+    )
+    print(client_connection.send_packets_buffer)
     if method == "POST":
-        http_request = get_http_request(method, file_name, info, host, user_agent)
-        reliable_udp_packets = get_packets(
-            SRC_PORT, http_request, client_connection.num
-        )
-
-        while len(reliable_udp_packets):
-            next_packet = reliable_udp_packets.pop(0)
-            sock.sendto(next_packet, (DEST_ADDR, SRC_PORT))
+        while len(client_connection.send_packets_buffer):
+            next_packet = client_connection.send_packets_buffer.pop(0)
+            sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
             while True:
                 try:
-                    packet = str(sock.recvfrom(MAX_PACKET_SIZE), "utf-8")
+                    print("Receiving")
+                    packet, (addr, port) = sock.recvfrom(MAX_PACKET_SIZE)
+                    print("Received")
                     # check not corrupted
-                    header = unpack(packet[:HEADER_LENGTH])
+                    header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
                     checksum = header[0]
-                    num = header[2]
-                    ack = header[3]
-                    fin = header[4]
+                    num = header[1]
+                    ack = header[2]
+                    fin = header[3]
                     packet = (
                         pack(
                             PACK_FORMAT,
@@ -51,7 +52,6 @@ while True:
                             header[2],
                             header[3],
                             header[4],
-                            header[5],
                         )
                         + packet[HEADER_LENGTH:]
                     )
@@ -64,17 +64,19 @@ while True:
                 except socket.timeout:
                     sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
 
-        client_connection.data_buffer = []
+        client_connection.receive_data_buffer = []
+        max_tries = 3
+        first_time = True
         more = 1
         while more:
             try:
-                packet = str(sock.recvfrom(MAX_PACKET_SIZE), "utf-8")
+                packet, (addr, port) = sock.recvfrom(MAX_PACKET_SIZE)
                 # check not corrupted
-                header = unpack(packet[:HEADER_LENGTH])
+                header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
                 checksum = header[0]
-                num = header[2]
-                fin = header[4]
-                more = header[5]
+                num = header[1]
+                fin = header[3]
+                more = header[4]
                 packet = (
                     pack(
                         PACK_FORMAT,
@@ -83,36 +85,50 @@ while True:
                         header[2],
                         header[3],
                         header[4],
-                        header[5],
                     )
                     + packet[HEADER_LENGTH:]
                 )
                 if crc32(packet) == checksum:
                     if num != client_connection.num or fin:
                         raise socket.timeout
-                    client_connection.data_buffer.append(
+                    client_connection.receive_data_buffer.append(
                         packet[HEADER_LENGTH:].decode()
                     )
                     client_connection.num = not client_connection.num
-                    response_packet = get_ack_packet(SRC_PORT, client_connection.num)
+                    response_packet = get_ack_packet(client_connection.num)
                     sock.sendto(response_packet, (DEST_ADDR, DEST_PORT))
                 else:
                     raise socket.timeout
             except socket.timeout:
-                pass
+                if first_time:
+                    if max_tries:
+                        max_tries -= 1
+                        continue
+                    print("Server timed out!")
+                    print("Server did not send HTTP response.")
+                    break
+                else:
+                    sock.sendto(response_packet, (DEST_ADDR, DEST_PORT))
     else:
-        while len(reliable_udp_packets):
-            next_packet = reliable_udp_packets.pop(0)
-            sock.sendto(next_packet, (DEST_ADDR, SRC_PORT))
+        while len(client_connection.send_packets_buffer):
+            next_packet = client_connection.send_packets_buffer.pop(0)
+            print(next_packet)
+            print("Sending packet")
+            sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
+            print("Sent")
             while True:
                 try:
-                    packet = str(sock.recvfrom(MAX_PACKET_SIZE), "utf-8")
+                    print("Receiving packet")
+                    packet, (addr, port) = sock.recvfrom(MAX_PACKET_SIZE)
+                    print(packet, port)
+
+                    print("Received")
                     # check not corrupted
-                    header = unpack(packet[:HEADER_LENGTH])
+                    header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
                     checksum = header[0]
-                    num = header[2]
-                    ack = header[3]
-                    fin = header[4]
+                    num = header[1]
+                    ack = header[2]
+                    fin = header[3]
                     packet = (
                         pack(
                             PACK_FORMAT,
@@ -121,7 +137,6 @@ while True:
                             header[2],
                             header[3],
                             header[4],
-                            header[5],
                         )
                         + packet[HEADER_LENGTH:]
                     )
@@ -129,23 +144,25 @@ while True:
                         if num != client_connection.num or not ack or fin:
                             raise socket.timeout
                         client_connection.num = not client_connection.num
+                        break
                     else:
                         raise socket.timeout  # resend last packet
                 except socket.timeout:
+                    print("Timed out")
                     sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
 
-        client_connection.data_buffer = []
+        client_connection.receive_data_buffer = []
+        max_tries = 3
+        first_time = True
         more = 1
         while more:
             try:
-                packet = str(sock.recvfrom(MAX_PACKET_SIZE), "utf-8")
-
-                header = unpack(packet[:HEADER_LENGTH])
-
+                packet, (addr, port) = sock.recvfrom(MAX_PACKET_SIZE)
+                header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
                 checksum = header[0]
-                num = header[2]
-                fin = header[4]
-                more = header[5]
+                num = header[1]
+                fin = header[3]
+                more = header[4]
 
                 packet = (
                     pack(
@@ -155,26 +172,33 @@ while True:
                         header[2],
                         header[3],
                         header[4],
-                        header[5],
                     )
                     + packet[HEADER_LENGTH:]
                 )
                 if crc32(packet) == checksum:
                     if num != client_connection.num or fin:
                         raise socket.timeout
-                    client_connection.data_buffer.append(
+                    client_connection.receive_data_buffer.append(
                         packet[HEADER_LENGTH:].decode()
                     )
                     client_connection.num = not client_connection.num
-                    response_packet = get_ack_packet(SRC_PORT, client_connection.num)
+                    response_packet = get_ack_packet(client_connection.num)
                     sock.sendto(response_packet, (DEST_ADDR, DEST_PORT))
                 else:
                     raise socket.timeout
             except socket.timeout:
-                sock.sendto(packet, (DEST_ADDR, DEST_PORT))
+                if first_time:
+                    if max_tries:
+                        max_tries -= 1
+                        continue
+                    print("Server timed out!")
+                    print("Server did not send HTTP response.")
+                    break
+                else:
+                    sock.sendto(response_packet, (DEST_ADDR, DEST_PORT))
 
     http_response = ""
-    for data in client_connection.data_buffer:
+    for data in client_connection.receive_data_buffer:
         http_response += data
 
     # parse http_response or something

@@ -37,25 +37,25 @@ def get_http_request(
 # image/png
 
 
-def get_http_response(method, status_code, status, data="", browser="browserX/2.0"):
+def get_http_response(method, status_code, status, data, server):
     """_summary: construct the header of the http response
 
     Args:
-        method (str):  GET/POST
+        method (str): GET/POST
         status_code (str): 200/404
         status (str): OK/NOT FOUND
-        data (str, optional): used in case of GET to  send the requested file not used in case of POST. Defaults to "".
-        browser (str, optional): the browser of the server. Defaults to "browserX/2.0".
+        data (str): used in case of GET to send the requested file not used in case of POST.
+        server (str): the server.
 
     Returns:
-        header (str): the responde header of the http 1.0
+        header (str): the response header of the http 1.0
     """
     system = platform.uname()
     now = datetime.now()
 
     header = (
         "HTTP/1.0 "
-        + status_code
+        + str(status_code)
         + " "
         + status
         + "\n"
@@ -63,7 +63,7 @@ def get_http_response(method, status_code, status, data="", browser="browserX/2.
         + now.strftime("%a, %d %b %Y %H:%M:%S %Z")
         + "\n"
         + "Server: "
-        + browser
+        + server
         + " ("
         + system[0]
         + " "
