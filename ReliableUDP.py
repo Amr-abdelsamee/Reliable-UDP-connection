@@ -1,25 +1,39 @@
 import socket
 from datetime import datetime
-from struct import pack
+from struct import pack, unpack
 from zlib import crc32
+
+"""
+Use RDT 3.0 for reliable data transfer over UDP
+"""
+MAX_PACKET_SIZE = 1024
+PACKET_LOSS_TIMEOUT = 0.3
+PACK_FORMAT = "!II????"
+HEADER_LENGTH = 12
 
 
 class ClientConnectionInfo:
-    ack: int = 0
-    seq: int = 1
-    datetime_iso: str = ""
+    port: int = 0
+    num: bool = 0  # refer to the number of packet 0 or 1
+    datetime_iso: str = ""  # datetime_iso of last packet sent
     packets_buffer: list[str] = []
-    control_flag_bits: int = 0b000000
-    last_packet: str
+    ACK: bool = 0  # used to acknowledge last packet
+    FIN: bool = 0  # used to close the connection
+    SENT: bool = 0  # used to indicate if last message was sent or received
+    last_packet: str = ""  # holds the last packet sent incase it needs to be resent
 
 
 class ReliableUDPServer:
-    max_packet_size: int = 8192
-    packet_loss_timeout: float = 0.3  # packet_loss_timeout in seconds
+    max_packet_size: int = MAX_PACKET_SIZE
+    packet_loss_timeout: float = PACKET_LOSS_TIMEOUT  # packet_loss_timeout in seconds
     clients_connections: dict[str, ClientConnectionInfo] = {}
     # maps each client address (str) to their own ClientConnectionInfo
 
-    def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
+    def __init__(
+        self,
+        server_address,
+        RequestHandlerClass,
+    ):
         self.server_address = server_address
         self.RequestHandlerClass = RequestHandlerClass
         self.socket = socket.socket(
@@ -40,18 +54,24 @@ class ReliableUDPServer:
                 self.client_addr = None
                 pass
             finally:
-                self.clients_connections = self.RequestHandlerClass(
+                self.clients_connections: dict[
+                    str, ClientConnectionInfo
+                ] = self.RequestHandlerClass(
                     (self.data, self.socket),
                     self.client_addr,
                     self,
                     self.clients_connections,
+                    self.packet_loss_timeout,
                 )
 
             current_datetime = datetime.now()
             current_datetime_iso = current_datetime.isoformat(timespec="microseconds")
             min_datetime_iso = current_datetime_iso
-            for _, client_connection in self.clients_connections:
-                min_datetime_iso = min(min_datetime_iso, client_connection.datetime_iso)
+            for _, client_connection in self.clients_connections.items():
+                if client_connection.SENT:
+                    min_datetime_iso = min(
+                        min_datetime_iso, client_connection.datetime_iso
+                    )
             # calculate the minimum timeout to ensure the closest expiry is checked
             min_datetime = datetime.fromisoformat(min_datetime_iso)
             min_timeout = max(
@@ -69,45 +89,97 @@ class ReliableUDPServer:
         pass
 
 
-class ReliableUDPClient:
-    max_packet_size: int = 8192
-    packet_loss_timeout: float = 0.3  # packet_loss_timeout in seconds
-    client_connection: ClientConnectionInfo
+def wrap_http(
+    method: str, file_name: str, data: str, host: str, user_agent: str
+) -> str:
+    message = f"""{method} /{file_name} HTTP/1.0
+    Host: {host}
+    User-Agent: {user_agent}"""
+    if method == "POST":
+        message += f"""
+        Content-Type: text/html
+        Content-Length: {len(data)}"""
+    return message
 
-    def wrap_http(
-        self, method: str, file_name: str, data: str, host: str, user_agent: str
-    ) -> str:
-        message = f"""{method} /{file_name} HTTP/1.0
-        Host: {host}
-        User-Agent: {user_agent}"""
-        if method == "POST":
-            message += f"""
-            Content-Type: text/html
-            Content-Length: {len(data)}"""
-        return message
 
-    def get_packets(self, http_request: str) -> list:
-        packets = []
-        header_length = (
-            20  # 4 byte unsigned int [ack, seq, control_flag_bits, checksum]
+def get_packets(src_port: int, http_request: str, last_num: bool) -> list:
+    packets = []
+    header_length = HEADER_LENGTH  # 4 byte unsigned int [checksum, src_port], 1 byte bool [num, ACK, FIN, MORE]
+    max_len = MAX_PACKET_SIZE - header_length
+    n = len(http_request) / max_len
+    for i in range(n):
+        message = http_request[:max_len]
+        http_request = http_request[max_len:]
+        num = last_num if (i % 2) else not last_num
+        header = pack(
+            PACK_FORMAT,
+            0,
+            src_port,
+            num,
+            0,  # ACK = 0
+            0,  # FIN = 0
+            (i != n - 1),  # 1 if MORE packets after this
         )
-        max_len = self.max_packet_size - header_length
-        n = len(http_request) / max_len
-        for i in range(n):
-            message = http_request[:max_len]
-            checksum = crc32(message)
-            http_request = http_request[max_len:]
-            packet = pack(
-                f"!IIIIII{len(message)}s",
-                checksum,
-                self.client_connection.ack,
-                self.client_connection.seq,
-                self.client_connection.control_flag_bits,
-                message,
-            )
-            packet_len = header_length + len(message)
-            self.client_connection.seq += packet_len
+        packet = header + message.encode()
+        checksum = crc32(packet)
+        header = unpack(packet[:header_length])
+        header[0] = checksum
+        header = pack(
+            PACK_FORMAT,
+            header[0],
+            header[1],
+            header[2],
+            header[3],
+            header[4],
+            header[5],
+        )
+        packet = header + packet[header_length:]
+        packets.append(packet)
 
-            packets.append(packet)
+    return packets
 
-        return packets
+
+def get_ack_packet(src_port: int, last_num: bool):
+    header = pack(
+        PACK_FORMAT,
+        0,
+        src_port,
+        last_num,
+        1,  # ACK = 1
+        0,  # FIN = 0
+        0,  # no more packets
+    )
+    checksum = crc32(header)
+    header = pack(
+        PACK_FORMAT,
+        checksum,
+        src_port,
+        last_num,
+        1,  # ACK = 1
+        0,  # FIN = 0
+        0,  # no more packets
+    )
+    return header
+
+
+def get_fin_packet(src_port: int, last_num: bool, ack: bool):
+    header = pack(
+        PACK_FORMAT,
+        0,
+        src_port,
+        last_num,
+        ack,
+        1,  # FIN = 1
+        0,  # no more packets
+    )
+    checksum = crc32(header)
+    header = pack(
+        PACK_FORMAT,
+        checksum,
+        src_port,
+        last_num,
+        ack,
+        1,  # FIN = 1
+        0,  # no more packets
+    )
+    return header

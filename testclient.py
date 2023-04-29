@@ -1,7 +1,6 @@
 import socket
-import sys
 from zlib import crc32
-from ReliableUDP import ClientConnectionInfo, ReliableUDPClient
+from ReliableUDP import *
 
 HOST, PORT = "localhost", 9999
 host = f"HOST:{PORT}"
@@ -11,9 +10,7 @@ user_agent = (
 
 # SOCK_DGRAM is the socket type to use for UDP sockets
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-reliable_udp_client = ReliableUDPClient()
-# As you can see, there is no connect() call; UDP has no connections.
-# Instead, data is directly sent to the recipient via sendto().
+client_connection = ClientConnectionInfo()
 
 while True:
     method = input("GET/POST: ")
@@ -24,23 +21,38 @@ while True:
         print("Enter valid method")
     file_name = input("file name: ")
 
-    http_request = reliable_udp_client.wrap_http(file_name, info, host, user_agent)
-    reliable_udp_packets = reliable_udp_client.get_packets(http_request)
+    http_request = wrap_http(file_name, info, host, user_agent)
+    reliable_udp_packets = get_packets(PORT, http_request, client_connection.num)
 
     while len(reliable_udp_packets):
         next_packet = reliable_udp_packets[0]
         reliable_udp_packets = reliable_udp_packets[1:]
         sock.sendto(bytes(next_packet, "utf-8"), (HOST, PORT))
-        sock.settimeout(reliable_udp_client.packet_loss_timeout)
+        sock.settimeout(PACKET_LOSS_TIMEOUT)
 
         while True:
             try:
-                received = str(
-                    sock.recvfrom(reliable_udp_client.max_packet_size), "utf-8"
+                packet = str(sock.recvfrom(MAX_PACKET_SIZE), "utf-8")
+                # check not corrupted
+                header = unpack(packet[:HEADER_LENGTH])
+                checksum = header[0]
+                header[0] = 0
+                packet = (
+                    pack(
+                        PACK_FORMAT,
+                        header[0],
+                        header[1],
+                        header[2],
+                        header[3],
+                        header[4],
+                        header[5],
+                    )
+                    + packet[HEADER_LENGTH:]
                 )
-                # check received is not corrupted
-                # check received is the appropriate seq number
-                reliable_udp_client.client_connection.packets_buffer.append(received)
-                break
+                if crc32(packet) == checksum:
+                    # TODO: implement receiving or sending files
+                    client_connection.packets_buffer.append(packet)
+                else:
+                    raise socket.timeout
             except socket.timeout:
                 sock.sendto(bytes(next_packet, "utf-8"), (HOST, PORT))
