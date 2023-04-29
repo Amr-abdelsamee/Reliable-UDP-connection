@@ -150,7 +150,6 @@ while True:
                 except socket.timeout:
                     print("Timed out")
                     sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
-
         client_connection.receive_data_buffer = []
         max_tries = 3
         first_time = True
@@ -158,6 +157,7 @@ while True:
         while more:
             try:
                 packet, (addr, port) = sock.recvfrom(MAX_PACKET_SIZE)
+                print(packet)
                 header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
                 checksum = header[0]
                 num = header[1]
