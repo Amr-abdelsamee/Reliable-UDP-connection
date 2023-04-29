@@ -23,7 +23,7 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
             current_datetime = datetime.now()
             current_datetime_iso = current_datetime.isoformat(timespec="microseconds")
             for client_addr, client_connection in self.clients_connections.items():
-                if client_connection.SENT:
+                if client_connection.waiting:
                     # find out which client(s) timed out and deal with them
                     client_datetime = datetime.fromisoformat(
                         client_connection.datetime_iso
@@ -42,11 +42,14 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
             # check not corrupted
             header = unpack(self.packet[:HEADER_LENGTH])
             checksum = header[0]
-            header[0] = 0
+            src_port = header[1]
+            num = header[2]
+            ack = header[3]
+            fin = header[4]
             packet = (
                 pack(
                     PACK_FORMAT,
-                    header[0],
+                    0,
                     header[1],
                     header[2],
                     header[3],
@@ -71,9 +74,9 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
                             self.client_address
                         ].datetime_iso = current_datetime_iso
                     else:
-                        if header[4] and header[3]:  # FIN & ACK connection closed
+                        if fin and ack:  # FIN & ACK connection closed
                             self.clients_connections.pop(self.client_address)
-                        elif header[4]:  # FIN
+                        elif fin:  # FIN
                             packet = get_fin_packet(
                                 self.server.server_address[1],
                                 client_connection.num,
@@ -96,7 +99,7 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
                             self.clients_connections[
                                 self.client_address
                             ].last_packet = packet
-                            self.clients_connections[self.client_address].SENT = 1
+                            self.clients_connections[self.client_address].waiting = 1
                         else:
                             # TODO: parse http
                             # server maybe will need while loop here to finish sending the whole file
@@ -105,16 +108,16 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
                             pass
                 else:
                     # new client connection
-                    if header[2] == 0:  # num should start with 0, otherwise ignore
+                    if num == 0:  # num should start with 0, otherwise ignore
                         self.clients_connections[
                             self.client_address
                         ] = ClientConnectionInfo()
-                        self.clients_connections[self.client_address].port = header[1]
+                        self.clients_connections[self.client_address].port = src_port
                         # TODO: parse http
                         # server maybe will need while loop here to finish sending the whole file
                         # or receive part of file
                         # continue client connection
-                        self.clients_connections[self.client_address].SENT = 1
+                        self.clients_connections[self.client_address].waiting = 1
             else:
                 client_connection = self.clients_connections[self.client_address]
                 self.socket.sendto(
@@ -133,5 +136,5 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
 
 if __name__ == "__main__":
     HOST, PORT = "localhost", 9999
-    with ReliableUDPServer((HOST, PORT), ReliableUDPHandler, {}) as server:
+    with ReliableUDPServer((HOST, PORT), ReliableUDPHandler) as server:
         server.serve_forever()

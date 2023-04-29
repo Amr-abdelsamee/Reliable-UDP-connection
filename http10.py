@@ -3,35 +3,30 @@
 import platform
 from datetime import datetime
 
-def http_request(method, file_name, host="localhost", browser="browserX/2.0", data=""):
+
+def get_http_request(
+    method: str, file_name: str, data: str, host: str, user_agent: str
+) -> str:
     """_summary: construct the header of the http request
 
     Args:
         method (str): GET/POST.
         file_name (str): requested file.
-        host (str, optional): the server. Defaults to "localhost".
-        browser (str, optional): the browser of the client. Defaults to "browserX/2.0".
+        host (str): the server.
+        user_agent (str): the user agent of the client.
 
     Returns:
-        header (str): the request header of the http 1.0
+        message (str): the request of the http 1.0
     """
-
-    system = platform.uname()
-    User_Agent = browser + ' (' + system[0] +' '+ system[2] +' '+ system[4] + ')'
-
-    header = (
-    method + " /" + file_name + " HTTP/1.0" + "\n" +
-    "User_Agent: " + User_Agent  + "\n" +
-    "Host: " + host + "\n" 
-    )
-
+    message = f"""{method} /{file_name} HTTP/1.0
+    Host: {host}
+    User-Agent: {user_agent}"""
     if method == "POST":
-        header_p1 = (
-        "Content-Type: text/plain" + "\n"
-        "Content-Length: " + str(len(data)) 
-        )
-        header =  header + header_p1 + "\n\n" + data
-    return header
+        message += f"""
+        Content-Type: text/html
+        Content-Length: {len(data)}"""
+    return message
+
 
 # most common types of Content-Type:
 # text/html
@@ -41,7 +36,8 @@ def http_request(method, file_name, host="localhost", browser="browserX/2.0", da
 # image/jpeg
 # image/png
 
-def http_response(method, status_code, status,  data="", browser="browserX/2.0"):
+
+def get_http_response(method, status_code, status, data="", browser="browserX/2.0"):
     """_summary: construct the header of the http response
 
     Args:
@@ -58,13 +54,30 @@ def http_response(method, status_code, status,  data="", browser="browserX/2.0")
     now = datetime.now()
 
     header = (
-    "HTTP/1.0 " + status_code + " " + status + "\n" +
-    "Date: " + now.strftime("%a, %d %b %Y %H:%M:%S %Z") + "\n" +
-    "Server: " + browser + ' (' + system[0] +' '+ system[2] +' '+ system[4] + ')\n' +
-    "Content-Length: " + str(len(data)) + "\n" +
-    "Content-Type: " + "text/plain"
+        "HTTP/1.0 "
+        + status_code
+        + " "
+        + status
+        + "\n"
+        + "Date: "
+        + now.strftime("%a, %d %b %Y %H:%M:%S %Z")
+        + "\n"
+        + "Server: "
+        + browser
+        + " ("
+        + system[0]
+        + " "
+        + system[2]
+        + " "
+        + system[4]
+        + ")\n"
+        + "Content-Length: "
+        + str(len(data))
+        + "\n"
+        + "Content-Type: "
+        + "text/plain"
     )
-    
+
     if method == "GET":
         header = header + "\n\n" + data
     return header

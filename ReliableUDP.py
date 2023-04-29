@@ -2,12 +2,14 @@ import socket
 from datetime import datetime
 from struct import pack, unpack
 from zlib import crc32
+from math import ceil
 
 """
 Use RDT 3.0 for reliable data transfer over UDP
 """
 MAX_PACKET_SIZE = 1024
 PACKET_LOSS_TIMEOUT = 0.3
+# 4 byte unsigned int [checksum, src_port], 1 byte bool [num, ACK, FIN, MORE]
 PACK_FORMAT = "!II????"
 HEADER_LENGTH = 12
 
@@ -16,10 +18,8 @@ class ClientConnectionInfo:
     port: int = 0
     num: bool = 0  # refer to the number of packet 0 or 1
     datetime_iso: str = ""  # datetime_iso of last packet sent
-    packets_buffer: list[str] = []
-    ACK: bool = 0  # used to acknowledge last packet
-    FIN: bool = 0  # used to close the connection
-    SENT: bool = 0  # used to indicate if last message was sent or received
+    data_buffer: list[str] = []
+    waiting: bool = 0
     last_packet: str = ""  # holds the last packet sent incase it needs to be resent
 
 
@@ -89,27 +89,14 @@ class ReliableUDPServer:
         pass
 
 
-def wrap_http(
-    method: str, file_name: str, data: str, host: str, user_agent: str
-) -> str:
-    message = f"""{method} /{file_name} HTTP/1.0
-    Host: {host}
-    User-Agent: {user_agent}"""
-    if method == "POST":
-        message += f"""
-        Content-Type: text/html
-        Content-Length: {len(data)}"""
-    return message
-
-
 def get_packets(src_port: int, http_request: str, last_num: bool) -> list:
     packets = []
-    header_length = HEADER_LENGTH  # 4 byte unsigned int [checksum, src_port], 1 byte bool [num, ACK, FIN, MORE]
-    max_len = MAX_PACKET_SIZE - header_length
-    n = len(http_request) / max_len
+    header_length = HEADER_LENGTH
+    max_len_message = MAX_PACKET_SIZE - header_length
+    n = ceil(len(http_request) / max_len_message)
     for i in range(n):
-        message = http_request[:max_len]
-        http_request = http_request[max_len:]
+        message = http_request[:max_len_message]
+        http_request = http_request[max_len_message:]
         num = last_num if (i % 2) else not last_num
         header = pack(
             PACK_FORMAT,
@@ -123,10 +110,9 @@ def get_packets(src_port: int, http_request: str, last_num: bool) -> list:
         packet = header + message.encode()
         checksum = crc32(packet)
         header = unpack(packet[:header_length])
-        header[0] = checksum
         header = pack(
             PACK_FORMAT,
-            header[0],
+            checksum,
             header[1],
             header[2],
             header[3],
