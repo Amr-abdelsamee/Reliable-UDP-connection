@@ -102,7 +102,7 @@ def get_packets(http_request: str, last_num: bool) -> list:
         message = http_request[:max_len_message]
         http_request = http_request[max_len_message:]
         num = last_num if (i % 2) == 0 else not last_num
-        print(num)
+        
         header = pack(
             PACK_FORMAT,
             0,

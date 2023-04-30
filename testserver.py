@@ -135,7 +135,7 @@ class ReliableUDPHandler(socketserver.BaseRequestHandler):
                         # server maybe will need while loop here to finish sending the whole file
                         # or receive part of file
                         # continue client connection
-            else:
+                else:
                 client_connection = self.clients_connections[self.client_address]
                 self.socket.sendto(
                     client_connection.last_packet,

@@ -18,23 +18,11 @@ def get_http_request(
     Returns:
         message (str): the request of the http 1.0
     """
-    message = f"""{method} /{file_name} HTTP/1.0
-    Host: {host}
-    User-Agent: {user_agent}"""
+    message = f"{method} /{file_name} HTTP/1.0\nHost: {host}\nUser-Agent: {user_agent}"
     if method == "POST":
-        message += f"""
-        Content-Type: text/html
-        Content-Length: {len(data)}"""
+        message += f"Content-Type: text/html\nContent-Length: {len(data)}\n\n{data}"
     return message
 
-
-# most common types of Content-Type:
-# text/html
-# text/plain
-# application/json
-# application/xml
-# image/jpeg
-# image/png
 
 
 def get_http_response(method, status_code, status, data, server):
@@ -83,13 +71,4 @@ def get_http_response(method, status_code, status, data, server):
     return header
 
 
-# example:
-# HTTP/1.0 200 OK
-# Date: Fri, 26 Apr 2023 20:13:47 GMT
-# Server: Apache/2.2.22 (Ubuntu)
-# Last-Modified: Tue, 30 Oct 2022 16:13:47 GMT
-# ETag: "a0f-4d8-4e9f9f9f9f9f9"
-# Accept-Ranges: bytes
-# Content-Length: 1234
-# Connection: close
-# Content-Type: text/html
+

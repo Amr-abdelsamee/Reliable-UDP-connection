@@ -1,43 +1,34 @@
 import socket
-from zlib import crc32
-from ReliableUDP import *
+from datetime import datetime
+from ReliableUDP import get_packets
 from http10 import *
-
-SRC_ADDR, SRC_PORT = "localhost", 8888
-DEST_ADDR, DEST_PORT = "localhost", 9999
-host = f"HOST:{DEST_PORT}"
+from ReliableUDP import *
+TCP_SRC_PORT = 3030
+UDP_SRC_PORT = 7777
+DEST_PORT = 9999
+HOST = 'localhost'
 user_agent = (
     "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:15.0) Gecko/20100101 Firefox/15.0.1"
 )
 
-# SOCK_DGRAM is the socket type to use for UDP sockets
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.bind((SRC_ADDR, SRC_PORT))
-sock.settimeout(PACKET_LOSS_TIMEOUT)
-client_connection = ClientConnectionInfo()
+def udp_connection(http_request):
+    print ("-------------------------------")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((HOST, UDP_SRC_PORT))
+    method = http_request[:4]
 
-while True:
-    method = input("GET/POST: ").upper()
-    info = None
-    if method == "POST":
-        info = input("data:")
-        file_name = ""
-    elif method != "GET":
-        print("Enter valid method")
-        continue
-    if method == "GET":
-        file_name = input("file name: ")
     
-    http_request = get_http_request(method, file_name, info, host, user_agent)
-    client_connection.send_packets_buffer = get_packets(
-        http_request, client_connection.num
-    )
-    print(client_connection.send_packets_buffer)
+    if method == "POST":
+        http_request = get_http_request("POST", "", http_request.split("\r\n\r\n")[1],f"{HOST}:{DEST_PORT}", user_agent)
+    else:
+        http_request = get_http_request("GET", http_request.split(" ")[1][1:], "",f"{HOST}:{DEST_PORT}", user_agent)
 
+    client_connection = ClientConnectionInfo()
+    client_connection.send_packets_buffer = get_packets(http_request, 0)
 
     while len(client_connection.send_packets_buffer):
         next_packet = client_connection.send_packets_buffer.pop(0)
-        sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
+        sock.sendto(next_packet, (HOST, DEST_PORT))
         while True:
             try:
 
@@ -69,10 +60,10 @@ while True:
                 else:
                     raise socket.timeout  # resend last packet
             except socket.timeout:
-                sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
+                sock.sendto(next_packet, (HOST, DEST_PORT))
     
     next_packet = get_ack_packet(not client_connection.num)
-    sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
+    sock.sendto(next_packet, (HOST, DEST_PORT))
 
 
 
@@ -106,14 +97,43 @@ while True:
                 )
                 next_packet = get_ack_packet(client_connection.num)
                 client_connection.num = not client_connection.num
-                sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
+                sock.sendto(next_packet, (HOST, DEST_PORT))
                 
             else:
                 raise socket.timeout
         except socket.timeout:
-            sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
+            sock.sendto(next_packet, (HOST, DEST_PORT))
 
 
     http_response = "".join(client_connection.receive_data_buffer)
     print("http response:: \n"+http_response)
+
+
+    sock.sendto(http_request.encode(), (HOST, DEST_PORT))
+    sock.close()
+
+
+
+
+while(True):
+    TCP_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    TCP_server.bind((HOST, TCP_SRC_PORT))
+
+    TCP_server.listen(1)
+    print(" :: Listening on port ",TCP_SRC_PORT)
+
+    connection, rec_adrs = TCP_server.accept()
+    print(" :: Connection established with:", rec_adrs)
+
+    rec_message = connection.recv(TCP_SRC_PORT).decode()
+
+    print(datetime.now().strftime("%H:%M:%S") + " :: Recieved message:\n", rec_message)
+    
+
+
+    connection.close()
+    TCP_server.close()
+    udp_connection(rec_message)
+
+
 
