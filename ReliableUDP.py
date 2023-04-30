@@ -26,26 +26,26 @@ class ReliableUDPServer:
     def serve_forever(self, packet_loss, error_rate):
         SRC_ADDR, SRC_PORT = "localhost", 9999
         server = "apache 2.0"
-        # SOCK_DGRAM is the socket type to use for UDP sockets
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind((SRC_ADDR, SRC_PORT))
         client_connection = ClientConnectionInfo()
 
         while True:
+            socket_error = False
+            # SOCK_DGRAM is the socket type to use for UDP sockets
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind((SRC_ADDR, SRC_PORT))
             client_connection.num = 0
             client_connection.receive_data_buffer = []
             sock.settimeout(None)
             print("Server start...")
             packet, (DEST_ADDR, DEST_PORT) = sock.recvfrom(MAX_PACKET_SIZE)
-            
+
             header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
+            print("Received packet header:", header)
             checksum = header[0]
             num = header[1]
             ack = header[2]
             fin = header[3]
             more = header[4]
-            print("\nRecieved packet")
-            print("num:"+str(num)+" client_connection.num "+str(client_connection.num) )
             packet = (
                 pack(
                     PACK_FORMAT,
@@ -68,12 +68,10 @@ class ReliableUDPServer:
                 )
                 sock.settimeout(PACKET_LOSS_TIMEOUT)
                 more = 1
-                last_interaction = False
-                while more:
+                while more and not socket_error:
                     old_more = more
                     try:
                         next_packet = get_ack_packet(client_connection.num)
-                        print("sending ACK")
                         send(
                             sock,
                             next_packet,
@@ -84,13 +82,12 @@ class ReliableUDPServer:
                         )
                         packet, (DEST_ADDR, DEST_PORT) = sock.recvfrom(MAX_PACKET_SIZE)
                         header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
+                        print("Received packet header:", header)
                         checksum = header[0]
                         num = header[1]
                         ack = header[2]
                         fin = header[3]
                         more = header[4]
-                        print("\nRecieved packet")
-                        print("num:"+str(num)+" client_connection.num "+str(client_connection.num) )
                         packet = (
                             pack(
                                 PACK_FORMAT,
@@ -102,16 +99,15 @@ class ReliableUDPServer:
                             )
                             + packet[HEADER_LENGTH:]
                         )
-                        if (
-                            crc32(packet) != checksum
-                            or fin
-                        ):
+                        if crc32(packet) != checksum or fin:
+                            print("Invalid checksum, or FIN; resending last packet.")
                             more = old_more
                             raise socket.timeout
                         elif num == client_connection.num:
                             if ack:
                                 client_connection.num = not client_connection.num
                             else:
+                                print("Invalid num; resending last packet.")
                                 more = old_more
                                 raise socket.timeout
                         else:
@@ -122,11 +118,12 @@ class ReliableUDPServer:
 
                     except socket.timeout:
                         pass
+                    except Exception as e:
+                        print(e)
+                        socket_error = True
 
                 complete_request = "".join(client_connection.receive_data_buffer)
                 print(f"\nhttp request:\n{complete_request}")
-
-
 
                 if complete_request[:3] == "GET":
                     file_name = complete_request.split(" ")[1].replace("/", "")
@@ -136,7 +133,7 @@ class ReliableUDPServer:
                         status = "OK"
                         file_content = f.read()
                     except FileNotFoundError:
-                        print("File not found! Check the path variable and filename")
+                        print("Requested file that was not found.")
                         status_code = 404
                         status = "NOT FOUND"
                         file_content = ""
@@ -151,9 +148,11 @@ class ReliableUDPServer:
                     http_response, client_connection.num
                 )
 
-                max_tries = 4                
-                print("******will send "+str(len(client_connection.send_packets_buffer))+" packets")
-                while len(client_connection.send_packets_buffer):
+                max_tries = 10
+                print(
+                    f"** Sending {len(client_connection.send_packets_buffer)} packet(s)"
+                )
+                while len(client_connection.send_packets_buffer) and not socket_error:
                     next_packet = client_connection.send_packets_buffer.pop(0)
                     send(
                         sock,
@@ -164,17 +163,16 @@ class ReliableUDPServer:
                         error_rate,
                     )
 
-                    while True:
+                    while not socket_error:
                         try:
                             packet, (addr, port) = sock.recvfrom(MAX_PACKET_SIZE)
                             # check not corrupted
                             header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
+                            print("Received packet header:", header)
                             checksum = header[0]
                             num = header[1]
                             ack = header[2]
                             fin = header[3]
-                            print("recieved ACK")
-                            print("num:"+str(num)+" client_connection.num "+str(client_connection.num) )
                             packet = (
                                 pack(
                                     PACK_FORMAT,
@@ -189,17 +187,23 @@ class ReliableUDPServer:
 
                             if crc32(packet) == checksum:
                                 if num != client_connection.num or not ack or fin:
+                                    print(
+                                        "Invalid num, or not ACK, or FIN; resending last packet."
+                                    )
                                     raise socket.timeout
                                 client_connection.num = not client_connection.num
                                 break
                             else:
+                                print("Invalid checksum; resending last packet.")
                                 raise socket.timeout  # resend last packet
                         except socket.timeout:
-                            if not len(client_connection.send_packets_buffer):
-                                if not max_tries:
+                            if len(client_connection.send_packets_buffer) == 0:
+                                if max_tries == 0:
+                                    print(
+                                        "Reached max tries for last packet; ending connection."
+                                    )
                                     break
                                 max_tries -= 1
-                            print("sending packet again")
                             send(
                                 sock,
                                 next_packet,
@@ -208,9 +212,16 @@ class ReliableUDPServer:
                                 packet_loss,
                                 error_rate,
                             )
-
+                        except Exception as e:
+                            print(e)
+                            socket_error = True
             else:
-                print("Invalid request!")
+                print("Invalid checksum, or invalid num, or ACK, or FIN.")
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+                sock.close()
+            except Exception as e:
+                print(e)
 
 
 def send(
@@ -255,11 +266,13 @@ def send(
                 )
                 + packet[HEADER_LENGTH:]
             )
-            print("packet corrupted!")
+            print("Packet corrupted.")
+        header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
+        print("Sent packet header:", header)
         sock.sendto(packet, (dest_addr, dest_port))
-        print("Packet sent")
+        print("Packet sent.")
     else:
-        print("packet lost!")
+        print("Packet lost.")
 
 
 def get_packets(http_request: str, last_num: bool) -> list:
@@ -270,7 +283,10 @@ def get_packets(http_request: str, last_num: bool) -> list:
     for i in range(n):
         message = http_request[:max_len_message]
         http_request = http_request[max_len_message:]
-        num = last_num if (i % 2) == 0 else not last_num
+        if i % 2 == 0:
+            num = last_num
+        else:
+            num = not last_num
 
         header = pack(
             PACK_FORMAT,
@@ -315,6 +331,3 @@ def get_ack_packet(last_num: bool):
         0,  # no more packets
     )
     return header
-
-
-
