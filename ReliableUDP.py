@@ -1,8 +1,9 @@
 import socket
-from datetime import datetime
 from struct import pack, unpack
 from zlib import crc32
 from math import ceil
+from http10 import get_http_response
+from random import random
 
 """
 Use RDT 3.0 for reliable data transfer over UDP
@@ -16,81 +17,228 @@ HEADER_LENGTH = 8
 
 class ClientConnectionInfo:
     num: bool = 0  # refer to the number of packet 0 or 1
-    datetime_iso: str = ""  # datetime_iso of last packet sent
     send_packets_buffer: list[str] = []
     receive_data_buffer: list[str] = []
-    working: bool = 0
-    GET: bool = 1  # 1 == GET, 0 == POST
-    last_packet: str = ""  # holds the last packet sent incase it needs to be resent
 
 
 class ReliableUDPServer:
-    max_packet_size: int = MAX_PACKET_SIZE
-    packet_loss_timeout: float = PACKET_LOSS_TIMEOUT  # packet_loss_timeout in seconds
-    clients_connections: dict[str, ClientConnectionInfo] = {}
-    # maps each client address (str) to their own ClientConnectionInfo
+    def serve_forever(self, packet_loss, error_rate):
+        SRC_ADDR, SRC_PORT = "localhost", 9999
+        server = "apache 2.0"
+        # SOCK_DGRAM is the socket type to use for UDP sockets
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((SRC_ADDR, SRC_PORT))
+        client_connection = ClientConnectionInfo()
 
-    def __init__(
-        self,
-        server_address,
-        RequestHandlerClass,
-    ):
-        self.server_address = server_address
-        self.RequestHandlerClass = RequestHandlerClass
-        self.socket = socket.socket(
-            socket.AF_INET, socket.SOCK_DGRAM
-        )  # create UDP socket
-        self.server_bind()
-
-    def server_bind(self):
-        self.socket.bind(self.server_address)
-        self.server_address = self.socket.getsockname()
-
-    def serve_forever(self):
         while True:
-            try:
-                self.data, (self.client_addr, self.client_port) = self.socket.recvfrom(
-                    self.max_packet_size
+            client_connection.num = 0
+            client_connection.receive_data_buffer = []
+            sock.settimeout(None)
+            print("Server start...")
+            packet, (DEST_ADDR, DEST_PORT) = sock.recvfrom(MAX_PACKET_SIZE)
+            header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
+            checksum = header[0]
+            num = header[1]
+            ack = header[2]
+            fin = header[3]
+            more = header[4]
+            packet = (
+                pack(
+                    PACK_FORMAT,
+                    0,
+                    header[1],
+                    header[2],
+                    header[3],
+                    header[4],
                 )
-            except socket.timeout:
-                # set client addr to None, so RequestHandlerClass knows it's a timeout
-                self.client_addr = None
-                pass
-            finally:
-                self.clients_connections: dict[
-                    str, ClientConnectionInfo
-                ] = self.RequestHandlerClass(
-                    (self.data, self.socket),
-                    self.client_addr,
-                    self.client_port,
-                    self,
-                    self.clients_connections,
-                    self.packet_loss_timeout,
-                )
-
-            current_datetime = datetime.now()
-            current_datetime_iso = current_datetime.isoformat(timespec="microseconds")
-            min_datetime_iso = current_datetime_iso
-            for _, client_connection in self.clients_connections.items():
-                if client_connection.SENT:
-                    min_datetime_iso = min(
-                        min_datetime_iso, client_connection.datetime_iso
-                    )
-            # calculate the minimum timeout to ensure the closest expiry is checked
-            min_datetime = datetime.fromisoformat(min_datetime_iso)
-            min_timeout = max(
-                0,
-                self.packet_loss_timeout
-                - (current_datetime - min_datetime).total_seconds(),
+                + packet[HEADER_LENGTH:]
             )
+            if (
+                crc32(packet) == checksum
+                and num == client_connection.num
+                and not ack
+                and not fin
+            ):
+                client_connection.receive_data_buffer.append(
+                    packet[HEADER_LENGTH:].decode()
+                )
+                sock.settimeout(PACKET_LOSS_TIMEOUT)
+                more = 1
+                while more:
+                    try:
+                        next_packet = get_ack_packet(client_connection.num)
+                        send(
+                            sock,
+                            next_packet,
+                            DEST_ADDR,
+                            DEST_PORT,
+                            packet_loss,
+                            error_rate,
+                        )
+                        packet, (DEST_ADDR, DEST_PORT) = sock.recvfrom(MAX_PACKET_SIZE)
+                        header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
+                        checksum = header[0]
+                        num = header[1]
+                        ack = header[2]
+                        fin = header[3]
+                        more = header[4]
 
-            self.socket.settimeout(min_timeout)
+                        packet = (
+                            pack(
+                                PACK_FORMAT,
+                                0,
+                                header[1],
+                                header[2],
+                                header[3],
+                                header[4],
+                            )
+                            + packet[HEADER_LENGTH:]
+                        )
+                        if (
+                            crc32(packet) != checksum
+                            or num != client_connection.num
+                            or fin
+                        ):
+                            raise socket.timeout
+                        elif ack:
+                            client_connection.num = not client_connection.num
+                        else:
+                            client_connection.receive_data_buffer.append(
+                                packet[HEADER_LENGTH:].decode()
+                            )
+                            client_connection.num = not client_connection.num
 
-    def __enter__(self):
-        return self
+                    except socket.timeout:
+                        send(
+                            sock,
+                            next_packet,
+                            DEST_ADDR,
+                            DEST_PORT,
+                            packet_loss,
+                            error_rate,
+                        )
+                complete_request = "".join(client_connection.receive_data_buffer)
+                print(f"http request:\n{complete_request}")
 
-    def __exit__(self, *args):
-        pass
+                if complete_request[:3] == "GET":
+                    file_name = complete_request.split(" ")[1].replace("/", "")
+                    try:
+                        f = open(file_name, "r")
+                        status_code = 200
+                        status = "OK"
+                        file_content = f.read()
+                    except FileNotFoundError:
+                        print("File not found! Check the path variable and filename")
+                        status_code = 404
+                        status = "NOT FOUND"
+                        file_content = ""
+                    http_response = get_http_response(
+                        "GET", status_code, status, file_content, server
+                    )
+                elif complete_request[:4] == "POST":
+                    http_response = get_http_response("POST", 200, "OK", "", server)
+
+                print(f"http response:\n{http_response}")
+                client_connection.send_packets_buffer = get_packets(
+                    http_response, client_connection.num
+                )
+
+                while len(client_connection.send_packets_buffer):
+                    next_packet = client_connection.send_packets_buffer.pop(0)
+                    send(
+                        sock,
+                        next_packet,
+                        DEST_ADDR,
+                        DEST_PORT,
+                        packet_loss,
+                        error_rate,
+                    )
+                    while True:
+                        try:
+                            packet, (addr, port) = sock.recvfrom(MAX_PACKET_SIZE)
+                            # check not corrupted
+                            header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
+                            checksum = header[0]
+                            num = header[1]
+                            ack = header[2]
+                            fin = header[3]
+
+                            packet = (
+                                pack(
+                                    PACK_FORMAT,
+                                    0,
+                                    header[1],
+                                    header[2],
+                                    header[3],
+                                    header[4],
+                                )
+                                + packet[HEADER_LENGTH:]
+                            )
+
+                            if crc32(packet) == checksum:
+                                if num != client_connection.num or not ack or fin:
+                                    raise socket.timeout
+                                client_connection.num = not client_connection.num
+                                break
+                            else:
+                                raise socket.timeout  # resend last packet
+                        except socket.timeout:
+                            send(
+                                sock,
+                                next_packet,
+                                DEST_ADDR,
+                                DEST_PORT,
+                                packet_loss,
+                                error_rate,
+                            )
+
+            else:
+                print("Invalid request!")
+
+
+def send(
+    sock: socket.socket,
+    packet,
+    dest_addr,
+    dest_port,
+    packet_loss: float,
+    error_rate: float,
+) -> None:
+    """_summary: emulates packet_loss and packet errors
+
+    Args:
+        sock: bound socket.
+        packet: packet to be sent.
+        dest_addr: address to send to.
+        dest_port: port to send to.
+        packet_loss (float): 0 to 1, indicates probability of packet loss.
+        error_rate (float): 0 to 1, indicates probability of packet error.
+
+    Returns:
+        None
+    """
+    if packet_loss < 0 or packet_loss > 1:
+        packet_loss = 0
+    if error_rate < 0 or error_rate > 1:
+        error_rate = 0
+    p = random()
+    if p >= packet_loss:  # don't lose packet
+        p = random()
+        if p < error_rate:  # do create error
+            header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
+            checksum = header[0]
+            packet = (
+                pack(
+                    PACK_FORMAT,
+                    checksum + 1,  # corruption
+                    header[1],
+                    header[2],
+                    header[3],
+                    header[4],
+                )
+                + packet[HEADER_LENGTH:]
+            )
+        sock.sendto(packet, (dest_addr, dest_port))
 
 
 def get_packets(http_request: str, last_num: bool) -> list:
@@ -102,7 +250,7 @@ def get_packets(http_request: str, last_num: bool) -> list:
         message = http_request[:max_len_message]
         http_request = http_request[max_len_message:]
         num = last_num if (i % 2) == 0 else not last_num
-        
+
         header = pack(
             PACK_FORMAT,
             0,
@@ -143,27 +291,6 @@ def get_ack_packet(last_num: bool):
         last_num,
         1,  # ACK = 1
         0,  # FIN = 0
-        0,  # no more packets
-    )
-    return header
-
-
-def get_fin_packet(last_num: bool, ack: bool):
-    header = pack(
-        PACK_FORMAT,
-        0,
-        last_num,
-        ack,
-        1,  # FIN = 1
-        0,  # no more packets
-    )
-    checksum = crc32(header)
-    header = pack(
-        PACK_FORMAT,
-        checksum,
-        last_num,
-        ack,
-        1,  # FIN = 1
         0,  # no more packets
     )
     return header

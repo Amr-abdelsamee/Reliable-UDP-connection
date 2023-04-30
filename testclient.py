@@ -3,9 +3,11 @@ from zlib import crc32
 from ReliableUDP import *
 from http10 import *
 
+PACKET_LOSS = 0.1
+ERROR_RATE = 0.1
 SRC_ADDR, SRC_PORT = "localhost", 8888
 DEST_ADDR, DEST_PORT = "localhost", 9999
-host = f"HOST:{DEST_PORT}"
+host = f"{DEST_ADDR}:{DEST_PORT}"
 user_agent = (
     "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:15.0) Gecko/20100101 Firefox/15.0.1"
 )
@@ -17,6 +19,10 @@ sock.settimeout(PACKET_LOSS_TIMEOUT)
 client_connection = ClientConnectionInfo()
 
 while True:
+    print("Client start...")
+    client_connection.num = 0
+    client_connection.receive_data_buffer = []
+    client_connection.send_packets_buffer = []
     method = input("GET/POST: ").upper()
     info = None
     if method == "POST":
@@ -27,20 +33,25 @@ while True:
         continue
     if method == "GET":
         file_name = input("file name: ")
-    
+
     http_request = get_http_request(method, file_name, info, host, user_agent)
+    print(f"http request:\n{http_request}")
     client_connection.send_packets_buffer = get_packets(
         http_request, client_connection.num
     )
-    print(client_connection.send_packets_buffer)
-
 
     while len(client_connection.send_packets_buffer):
         next_packet = client_connection.send_packets_buffer.pop(0)
-        sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
+        send(
+            sock,
+            next_packet,
+            DEST_ADDR,
+            DEST_PORT,
+            PACKET_LOSS,
+            ERROR_RATE,
+        )
         while True:
             try:
-
                 packet, (addr, port) = sock.recvfrom(MAX_PACKET_SIZE)
                 # check not corrupted
                 header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
@@ -69,12 +80,24 @@ while True:
                 else:
                     raise socket.timeout  # resend last packet
             except socket.timeout:
-                sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
-    
+                send(
+                    sock,
+                    next_packet,
+                    DEST_ADDR,
+                    DEST_PORT,
+                    PACKET_LOSS,
+                    ERROR_RATE,
+                )
+
     next_packet = get_ack_packet(not client_connection.num)
-    sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
-
-
+    send(
+        sock,
+        next_packet,
+        DEST_ADDR,
+        DEST_PORT,
+        PACKET_LOSS,
+        ERROR_RATE,
+    )
 
     client_connection.receive_data_buffer = []
     more = 1
@@ -106,14 +129,26 @@ while True:
                 )
                 next_packet = get_ack_packet(client_connection.num)
                 client_connection.num = not client_connection.num
-                sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
-                
+                send(
+                    sock,
+                    next_packet,
+                    DEST_ADDR,
+                    DEST_PORT,
+                    PACKET_LOSS,
+                    ERROR_RATE,
+                )
+
             else:
                 raise socket.timeout
         except socket.timeout:
-            sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
-
+            send(
+                sock,
+                next_packet,
+                DEST_ADDR,
+                DEST_PORT,
+                PACKET_LOSS,
+                ERROR_RATE,
+            )
 
     http_response = "".join(client_connection.receive_data_buffer)
-    print("http response:: \n"+http_response)
-
+    print(f"http response:\n{http_response}")

@@ -24,7 +24,6 @@ def get_http_request(
     return message
 
 
-
 def get_http_response(method, status_code, status, data, server):
     """_summary: construct the header of the http response
 
@@ -42,33 +41,13 @@ def get_http_response(method, status_code, status, data, server):
     now = datetime.now()
 
     header = (
-        "HTTP/1.0 "
-        + str(status_code)
-        + " "
-        + status
-        + "\n"
-        + "Date: "
-        + now.strftime("%a, %d %b %Y %H:%M:%S %Z")
-        + "\n"
-        + "Server: "
-        + server
-        + " ("
-        + system[0]
-        + " "
-        + system[2]
-        + " "
-        + system[4]
-        + ")\n"
-        + "Content-Length: "
-        + str(len(data))
-        + "\n"
-        + "Content-Type: "
-        + "text/plain"
+        f"HTTP/1.0 {status_code} {status}\n"
+        + f"Date: {now.strftime('%a, %d %b %Y %H:%M:%S %Z')}\n"
+        + f"Server: {server} ({system[0]} {system[2]} {system[4]})\n"
+        + f"Content-Length: {len(data)}\n"
+        + "Content-Type: text/plain"
     )
 
     if method == "GET":
-        header = header + "\n\n" + data
+        header = header + f"\n\n{data}"
     return header
-
-
-
