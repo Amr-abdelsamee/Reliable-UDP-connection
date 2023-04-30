@@ -9,6 +9,7 @@ from random import random
 Use RDT 3.0 for reliable data transfer over UDP
 """
 MAX_PACKET_SIZE = 1024
+# MAX_PACKET_SIZE = 100
 PACKET_LOSS_TIMEOUT = 0.3
 # 4 byte unsigned int [checksum, src_port], 1 byte bool [num, ACK, FIN, MORE]
 PACK_FORMAT = "!I????"
@@ -36,12 +37,15 @@ class ReliableUDPServer:
             sock.settimeout(None)
             print("Server start...")
             packet, (DEST_ADDR, DEST_PORT) = sock.recvfrom(MAX_PACKET_SIZE)
+            
             header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
             checksum = header[0]
             num = header[1]
             ack = header[2]
             fin = header[3]
             more = header[4]
+            print("\nRecieved packet")
+            print("num:"+str(num)+" client_connection.num "+str(client_connection.num) )
             packet = (
                 pack(
                     PACK_FORMAT,
@@ -64,9 +68,12 @@ class ReliableUDPServer:
                 )
                 sock.settimeout(PACKET_LOSS_TIMEOUT)
                 more = 1
+                last_interaction = False
                 while more:
+                    old_more = more
                     try:
                         next_packet = get_ack_packet(client_connection.num)
+                        print("sending ACK")
                         send(
                             sock,
                             next_packet,
@@ -82,7 +89,8 @@ class ReliableUDPServer:
                         ack = header[2]
                         fin = header[3]
                         more = header[4]
-
+                        print("\nRecieved packet")
+                        print("num:"+str(num)+" client_connection.num "+str(client_connection.num) )
                         packet = (
                             pack(
                                 PACK_FORMAT,
@@ -96,12 +104,16 @@ class ReliableUDPServer:
                         )
                         if (
                             crc32(packet) != checksum
-                            or num != client_connection.num
                             or fin
                         ):
+                            more = old_more
                             raise socket.timeout
-                        elif ack:
-                            client_connection.num = not client_connection.num
+                        elif num == client_connection.num:
+                            if ack:
+                                client_connection.num = not client_connection.num
+                            else:
+                                more = old_more
+                                raise socket.timeout
                         else:
                             client_connection.receive_data_buffer.append(
                                 packet[HEADER_LENGTH:].decode()
@@ -109,16 +121,12 @@ class ReliableUDPServer:
                             client_connection.num = not client_connection.num
 
                     except socket.timeout:
-                        send(
-                            sock,
-                            next_packet,
-                            DEST_ADDR,
-                            DEST_PORT,
-                            packet_loss,
-                            error_rate,
-                        )
+                        pass
+
                 complete_request = "".join(client_connection.receive_data_buffer)
-                print(f"http request:\n{complete_request}")
+                print(f"\nhttp request:\n{complete_request}")
+
+
 
                 if complete_request[:3] == "GET":
                     file_name = complete_request.split(" ")[1].replace("/", "")
@@ -138,11 +146,13 @@ class ReliableUDPServer:
                 elif complete_request[:4] == "POST":
                     http_response = get_http_response("POST", 200, "OK", "", server)
 
-                print(f"http response:\n{http_response}")
+                print(f"\nhttp response:\n{http_response}")
                 client_connection.send_packets_buffer = get_packets(
                     http_response, client_connection.num
                 )
 
+                max_tries = 4                
+                print("******will send "+str(len(client_connection.send_packets_buffer))+" packets")
                 while len(client_connection.send_packets_buffer):
                     next_packet = client_connection.send_packets_buffer.pop(0)
                     send(
@@ -153,6 +163,7 @@ class ReliableUDPServer:
                         packet_loss,
                         error_rate,
                     )
+
                     while True:
                         try:
                             packet, (addr, port) = sock.recvfrom(MAX_PACKET_SIZE)
@@ -162,7 +173,8 @@ class ReliableUDPServer:
                             num = header[1]
                             ack = header[2]
                             fin = header[3]
-
+                            print("recieved ACK")
+                            print("num:"+str(num)+" client_connection.num "+str(client_connection.num) )
                             packet = (
                                 pack(
                                     PACK_FORMAT,
@@ -183,6 +195,11 @@ class ReliableUDPServer:
                             else:
                                 raise socket.timeout  # resend last packet
                         except socket.timeout:
+                            if not len(client_connection.send_packets_buffer):
+                                if not max_tries:
+                                    break
+                                max_tries -= 1
+                            print("sending packet again")
                             send(
                                 sock,
                                 next_packet,
@@ -238,7 +255,11 @@ def send(
                 )
                 + packet[HEADER_LENGTH:]
             )
+            print("packet corrupted!")
         sock.sendto(packet, (dest_addr, dest_port))
+        print("Packet sent")
+    else:
+        print("packet lost!")
 
 
 def get_packets(http_request: str, last_num: bool) -> list:
@@ -294,3 +315,6 @@ def get_ack_packet(last_num: bool):
         0,  # no more packets
     )
     return header
+
+
+

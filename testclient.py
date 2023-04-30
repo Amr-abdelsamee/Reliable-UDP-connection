@@ -39,9 +39,10 @@ while True:
     client_connection.send_packets_buffer = get_packets(
         http_request, client_connection.num
     )
-
+    print("****will send "+str(len(client_connection.send_packets_buffer))+" packets")
     while len(client_connection.send_packets_buffer):
         next_packet = client_connection.send_packets_buffer.pop(0)
+        print("\nsending packet")
         send(
             sock,
             next_packet,
@@ -59,6 +60,8 @@ while True:
                 num = header[1]
                 ack = header[2]
                 fin = header[3]
+                print("Recieved Ack")
+                print("num:"+str(num)+" client_connection.num "+str(client_connection.num) )
 
                 packet = (
                     pack(
@@ -73,6 +76,7 @@ while True:
                 )
                 if crc32(packet) == checksum:
                     if num != client_connection.num or not ack or fin:
+                        print("sending req packet again")
                         raise socket.timeout
                     client_connection.receive_data_buffer.append(packet)
                     client_connection.num = not client_connection.num
@@ -88,7 +92,8 @@ while True:
                     PACKET_LOSS,
                     ERROR_RATE,
                 )
-
+    print("\nSending Ack")
+    print("num:"+str(num)+" client_connection.num "+str(client_connection.num) )
     next_packet = get_ack_packet(not client_connection.num)
     send(
         sock,
@@ -98,10 +103,11 @@ while True:
         PACKET_LOSS,
         ERROR_RATE,
     )
-
+    print("******waiting for the response...")
     client_connection.receive_data_buffer = []
     more = 1
     while more:
+        old_more = more 
         try:
             packet, (addr, port) = sock.recvfrom(MAX_PACKET_SIZE)
             # check not corrupted
@@ -110,6 +116,8 @@ while True:
             num = header[1]
             fin = header[3]
             more = header[4]
+            print("\nRecieved packet")
+            print("num:"+str(num)+" client_connection.num "+str(client_connection.num) )
             packet = (
                 pack(
                     PACK_FORMAT,
@@ -123,12 +131,15 @@ while True:
             )
             if crc32(packet) == checksum:
                 if num != client_connection.num or fin:
+                    more = old_more
                     raise socket.timeout
                 client_connection.receive_data_buffer.append(
                     packet[HEADER_LENGTH:].decode()
                 )
                 next_packet = get_ack_packet(client_connection.num)
                 client_connection.num = not client_connection.num
+                print("\nSending ACK")
+                print("num:"+str(num)+" client_connection.num "+str(client_connection.num) )
                 send(
                     sock,
                     next_packet,
@@ -137,8 +148,8 @@ while True:
                     PACKET_LOSS,
                     ERROR_RATE,
                 )
-
             else:
+                more = old_more
                 raise socket.timeout
         except socket.timeout:
             send(
