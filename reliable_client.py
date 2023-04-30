@@ -3,8 +3,8 @@ from zlib import crc32
 from ReliableUDP import *
 from http10 import *
 
-PACKET_LOSS = 0.3
-ERROR_RATE = 0.3
+PACKET_LOSS = 0
+ERROR_RATE = 0
 SRC_ADDR, SRC_PORT = "localhost", 8888
 DEST_ADDR, DEST_PORT = "localhost", 9999
 host = f"{DEST_ADDR}:{DEST_PORT}"
@@ -33,7 +33,7 @@ while True:
     method = input("GET/POST: ").upper()
     info = None
     if method == "POST":
-        info = input("data:")
+        info = input("data: ")
         file_name = ""
     elif method != "GET":
         print("Enter valid method")
