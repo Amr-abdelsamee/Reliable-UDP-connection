@@ -30,6 +30,7 @@ while True:
     )
     print(client_connection.send_packets_buffer)
     if method == "POST":
+
         while len(client_connection.send_packets_buffer):
             next_packet = client_connection.send_packets_buffer.pop(0)
             sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
@@ -44,6 +45,9 @@ while True:
                     num = header[1]
                     ack = header[2]
                     fin = header[3]
+                    print("num: ", num, "client_connection.num ", client_connection.num)
+                    # print("ack: ", ack)
+                    # print("fin: ", fin)
                     packet = (
                         pack(
                             PACK_FORMAT,
@@ -58,11 +62,18 @@ while True:
                     if crc32(packet) == checksum:
                         if num != client_connection.num or not ack or fin:
                             raise socket.timeout
+                        client_connection.receive_data_buffer.append(packet)
                         client_connection.num = not client_connection.num
+                        break
                     else:
                         raise socket.timeout  # resend last packet
                 except socket.timeout:
                     sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
+        
+        next_packet = get_ack_packet(not client_connection.num)
+        sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
+
+
 
         client_connection.receive_data_buffer = []
         max_tries = 3
@@ -70,6 +81,7 @@ while True:
         more = 1
         while more:
             try:
+                print("oh more1")
                 packet, (addr, port) = sock.recvfrom(MAX_PACKET_SIZE)
                 # check not corrupted
                 header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
@@ -77,6 +89,7 @@ while True:
                 num = header[1]
                 fin = header[3]
                 more = header[4]
+                print("num: ", num, "client_connection.num ", client_connection.num)
                 packet = (
                     pack(
                         PACK_FORMAT,
@@ -94,25 +107,22 @@ while True:
                     client_connection.receive_data_buffer.append(
                         packet[HEADER_LENGTH:].decode()
                     )
+                    next_packet = get_ack_packet(client_connection.num)
                     client_connection.num = not client_connection.num
-                    response_packet = get_ack_packet(client_connection.num)
-                    sock.sendto(response_packet, (DEST_ADDR, DEST_PORT))
+                    sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
+                    
                 else:
                     raise socket.timeout
             except socket.timeout:
-                if first_time:
-                    if max_tries:
-                        max_tries -= 1
-                        continue
-                    print("Server timed out!")
-                    print("Server did not send HTTP response.")
-                    break
-                else:
-                    sock.sendto(response_packet, (DEST_ADDR, DEST_PORT))
-    else:
+                sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
+
+    else:  # GET method
+        print("\n\n----->>>client_connection.send_packets_buffer: ",
+              len(client_connection.send_packets_buffer))
+
         while len(client_connection.send_packets_buffer):
             next_packet = client_connection.send_packets_buffer.pop(0)
-            print(next_packet)
+            print("buffer:", next_packet)
             print("Sending packet")
             sock.sendto(next_packet, (DEST_ADDR, DEST_PORT))
             print("Sent")
@@ -125,6 +135,7 @@ while True:
                     print("Received")
                     # check not corrupted
                     header = unpack(PACK_FORMAT, packet[:HEADER_LENGTH])
+                    print(header)
                     checksum = header[0]
                     num = header[1]
                     ack = header[2]
@@ -197,9 +208,5 @@ while True:
                 else:
                     sock.sendto(response_packet, (DEST_ADDR, DEST_PORT))
 
-    http_response = ""
-    for data in client_connection.receive_data_buffer:
-        http_response += data
-
-    # parse http_response or something
-    print(http_response)
+    http_response = "".join(client_connection.receive_data_buffer)
+    print("http_response:: ",http_response)
