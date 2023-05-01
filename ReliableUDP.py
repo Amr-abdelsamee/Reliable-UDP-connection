@@ -9,7 +9,6 @@ from random import random
 Use RDT 3.0 for reliable data transfer over UDP
 """
 MAX_PACKET_SIZE = 1024
-# MAX_PACKET_SIZE = 100
 PACKET_LOSS_TIMEOUT = 0.3
 # 4 byte unsigned int [checksum, src_port], 1 byte bool [num, ACK, FIN, MORE]
 PACK_FORMAT = "!I????"
@@ -111,6 +110,7 @@ class ReliableUDPServer:
                                 more = old_more
                                 raise socket.timeout
                         else:
+                            more = 1  # at least 1 more since didn't receive ack
                             client_connection.receive_data_buffer.append(
                                 packet[HEADER_LENGTH:].decode()
                             )
