@@ -44,7 +44,7 @@ while True:
     http_request = get_http_request(method, file_name, info, host, user_agent)
     print(f"http request:\n{http_request}")
     client_connection.send_packets_buffer = get_packets(
-        http_request, client_connection.num
+        http_request, client_connection.num, all_more=True
     )
     print(f"** Sending {len(client_connection.send_packets_buffer)} packet(s)")
     while len(client_connection.send_packets_buffer) and not socket_error:

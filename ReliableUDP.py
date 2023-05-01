@@ -110,7 +110,6 @@ class ReliableUDPServer:
                                 more = old_more
                                 raise socket.timeout
                         else:
-                            more = 1  # at least 1 more since didn't receive ack
                             client_connection.receive_data_buffer.append(
                                 packet[HEADER_LENGTH:].decode()
                             )
@@ -275,7 +274,7 @@ def send(
         print("Packet lost.")
 
 
-def get_packets(http_request: str, last_num: bool) -> list:
+def get_packets(http_request: str, last_num: bool, all_more=False) -> list:
     packets = []
     header_length = HEADER_LENGTH
     max_len_message = MAX_PACKET_SIZE - header_length
@@ -294,7 +293,7 @@ def get_packets(http_request: str, last_num: bool) -> list:
             num,
             0,  # ACK = 0
             0,  # FIN = 0
-            (i != n - 1),  # 1 if MORE packets after this
+            1 if all_more else (i != n - 1),  # 1 if MORE packets after this
         )
         packet = header + message.encode()
         checksum = crc32(packet)
